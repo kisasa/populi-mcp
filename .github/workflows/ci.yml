@@ -20,3 +20,18 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - name: Check server.json against package.json and registry limits
+        run: |
+          node -e '
+            const p = require("./package.json"), s = require("./server.json");
+            const errs = [];
+            if (s.name !== p.mcpName) errs.push(`server.json name "${s.name}" != package.json mcpName "${p.mcpName}"`);
+            if (s.version !== p.version) errs.push(`server.json version ${s.version} != package.json version ${p.version}`);
+            for (const pkg of s.packages ?? []) {
+              if (pkg.identifier !== p.name) errs.push(`packages[].identifier "${pkg.identifier}" != package.json name "${p.name}"`);
+              if (pkg.version !== p.version) errs.push(`packages[].version ${pkg.version} != package.json version ${p.version}`);
+            }
+            // the MCP Registry rejects longer descriptions with a 422 at publish time
+            if (s.description.length > 100) errs.push(`server.json description is ${s.description.length} chars (registry max 100)`);
+            if (errs.length) { console.error(errs.join("\n")); process.exit(1); }
+          '
