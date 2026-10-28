@@ -2,7 +2,7 @@
 
 MCP server for the [Populi](https://populi.co/api) API v2. It lets Claude, Codex, Cursor and any other [Model Context Protocol](https://modelcontextprotocol.io) client look up people, admissions, academics and billing data in your Populi instance, and, if you opt in, make changes.
 
-**Package:** `populi-mcp` on npm. **Command:** `populi-mcp`. **Transport:** stdio.
+**Package:** `@kisasa/populi-mcp` on npm. **Command:** `populi-mcp`. **Transport:** stdio.
 
 ## How it works
 
@@ -41,7 +41,7 @@ With no `POPULI_ALLOW_WRITES`, the write tool is not registered at all, so the m
 
 ## Install
 
-Requires Node.js 20 or newer. Every client below runs `npx -y populi-mcp`, so there is nothing to install by hand.
+Requires Node.js 20 or newer. Every client below runs `npx -y @kisasa/populi-mcp`, so there is nothing to install by hand.
 
 ### Claude Code
 
@@ -49,7 +49,7 @@ Requires Node.js 20 or newer. Every client below runs `npx -y populi-mcp`, so th
 claude mcp add populi \
   -e POPULI_BASE_URL=https://yourschool.populiweb.com \
   -e POPULI_API_KEY=sk_sandbox_... \
-  -- npx -y populi-mcp
+  -- npx -y @kisasa/populi-mcp
 ```
 
 ### Claude Desktop
@@ -61,7 +61,7 @@ Edit `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/
   "mcpServers": {
     "populi": {
       "command": "npx",
-      "args": ["-y", "populi-mcp"],
+      "args": ["-y", "@kisasa/populi-mcp"],
       "env": {
         "POPULI_BASE_URL": "https://yourschool.populiweb.com",
         "POPULI_API_KEY": "sk_sandbox_..."
@@ -71,7 +71,7 @@ Edit `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/
 }
 ```
 
-On Windows, if Claude Desktop cannot find `npx`, use `"command": "cmd"` with `"args": ["/c", "npx", "-y", "populi-mcp"]`.
+On Windows, if Claude Desktop cannot find `npx`, use `"command": "cmd"` with `"args": ["/c", "npx", "-y", "@kisasa/populi-mcp"]`.
 
 ### Codex
 
@@ -79,7 +79,7 @@ On Windows, if Claude Desktop cannot find `npx`, use `"command": "cmd"` with `"a
 codex mcp add populi \
   --env POPULI_BASE_URL=https://yourschool.populiweb.com \
   --env POPULI_API_KEY=sk_sandbox_... \
-  -- npx -y populi-mcp
+  -- npx -y @kisasa/populi-mcp
 ```
 
 or in `~/.codex/config.toml`:
@@ -87,7 +87,7 @@ or in `~/.codex/config.toml`:
 ```toml
 [mcp_servers.populi]
 command = "npx"
-args = ["-y", "populi-mcp"]
+args = ["-y", "@kisasa/populi-mcp"]
 
 [mcp_servers.populi.env]
 POPULI_BASE_URL = "https://yourschool.populiweb.com"
@@ -103,7 +103,7 @@ In `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global). Cursor expands
   "mcpServers": {
     "populi": {
       "command": "npx",
-      "args": ["-y", "populi-mcp"],
+      "args": ["-y", "@kisasa/populi-mcp"],
       "env": {
         "POPULI_BASE_URL": "https://yourschool.populiweb.com",
         "POPULI_API_KEY": "${env:POPULI_API_KEY}"
@@ -115,7 +115,7 @@ In `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global). Cursor expands
 
 ### Any other MCP client
 
-Run `npx -y populi-mcp` as a stdio server with `POPULI_BASE_URL` and `POPULI_API_KEY` in its environment.
+Run `npx -y @kisasa/populi-mcp` as a stdio server with `POPULI_BASE_URL` and `POPULI_API_KEY` in its environment.
 
 ### More than one instance
 

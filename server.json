@@ -12,7 +12,7 @@
   "packages": [
     {
       "registryType": "npm",
-      "identifier": "populi-mcp",
+      "identifier": "@kisasa/populi-mcp",
       "version": "0.1.0",
       "transport": {
         "type": "stdio"
