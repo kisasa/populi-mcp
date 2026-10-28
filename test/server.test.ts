@@ -37,6 +37,13 @@ describe("tool registration", () => {
     }
   });
 
+  it("tells the model the people list carries primary email and phone", async () => {
+    const { client } = await connect({});
+    const tool = (await client.listTools()).tools.find((t) => t.name === "populi_find_people");
+    expect(tool?.description).toContain("contact_primary_email");
+    expect(tool?.description).not.toMatch(/has no email/);
+  });
+
   it("tells the model whether it is read-only", async () => {
     const ro = await connect({});
     expect(ro.client.getInstructions()).toMatch(/read-only/);

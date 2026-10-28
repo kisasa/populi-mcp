@@ -82,8 +82,9 @@ export function registerReadTools(server: McpServer, client: PopuliClient): void
       title: "Find people in Populi",
       description:
         "Look up people by email address and/or name. Email is an exact match; first and last name are " +
-        "'contains' matches. Returns Populi's people list (ids and names; the list has no email addresses, " +
-        "so fetch /people/{id} with expand=['email_addresses'] for those). Needs at least one criterion.",
+        "'contains' matches. Returns Populi's people list: ids, names and status, plus a `report_data` block " +
+        "with the primary email and phone (contact_primary_email, contact_primary_phone). For full contact " +
+        "records fetch /people/{id} with expand=['email_addresses', 'phone_numbers']. Needs at least one criterion.",
       inputSchema: {
         email: z.string().optional().describe("Exact email address"),
         first_name: z.string().optional().describe("Substring of the first name"),

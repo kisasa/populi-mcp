@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanPath, PopuliClient, PopuliError } from "../src/lib/client.js";
+import { cleanPath, describeFetchError, PopuliClient, PopuliError } from "../src/lib/client.js";
 import { BASE, fakeFetch, jsonResponse, TEST_CONFIG } from "./helpers.js";
 
 describe("cleanPath", () => {
@@ -100,6 +100,33 @@ describe("PopuliClient", () => {
       kind: "binary",
       bytes: 10,
     });
+  });
+
+  it("includes the underlying network cause instead of a bare 'fetch failed'", async () => {
+    const dns = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("getaddrinfo ENOTFOUND tsri.demo.populiweb.com"), { code: "ENOTFOUND" }),
+    });
+    expect(describeFetchError(dns)).toBe("fetch failed (getaddrinfo ENOTFOUND tsri.demo.populiweb.com)");
+
+    // a refused connection on a dual-stack host: AggregateError with no message of its own
+    const refused = new TypeError("fetch failed", {
+      cause: Object.assign(new AggregateError([new Error("connect ECONNREFUSED 10.0.0.1:443")], ""), {
+        code: "ECONNREFUSED",
+      }),
+    });
+    expect(describeFetchError(refused)).toBe("fetch failed (connect ECONNREFUSED 10.0.0.1:443)");
+
+    expect(describeFetchError(new Error("boom"))).toBe("boom");
+    expect(describeFetchError("odd")).toBe("odd");
+  });
+
+  it("puts the cause in the error a tool call sees", async () => {
+    const fetch = (async () => {
+      throw new TypeError("fetch failed", { cause: Object.assign(new Error("getaddrinfo ENOTFOUND nope.example"), { code: "ENOTFOUND" }) });
+    }) as unknown as typeof globalThis.fetch;
+    await expect(new PopuliClient(TEST_CONFIG, fetch).request({ method: "POST", path: "/people" })).rejects.toThrow(
+      /ENOTFOUND nope\.example/,
+    );
   });
 
   it("reports unreachable hosts", async () => {

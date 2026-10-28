@@ -73,16 +73,27 @@ export class Catalog {
 
     const scored = pool.map((op) => {
       const id = op.id.toLowerCase();
+      // Field names are indexed at low weight so "application status" can narrow to the routes
+      // that actually have a status filter, instead of matching on the word "application" alone.
+      const names = [...op.params.map((p) => p.name), ...op.filters.map((f) => f.name), ...op.expand]
+        .join(" ")
+        .toLowerCase();
+      const model = op.model.toLowerCase();
       const fields: [string, number][] = [
         [id, 4],
         [op.title.toLowerCase(), 3],
         [op.path.toLowerCase(), 2],
         [op.description.toLowerCase(), 1],
+        [names, 1],
       ];
       let score = 0;
       let matched = 0;
       for (const t of tokens) {
-        const hit = fields.reduce((s, [text, w]) => (text.includes(t) ? s + w : s), 0);
+        let hit = fields.reduce((s, [text, w]) => (text.includes(t) ? s + w : s), 0);
+        // A word that names the model itself (application -> applications) beats a substring of
+        // another model's name (aidapplications), which would otherwise win ties alphabetically.
+        // The title is the singular model name ("Person" for people), which covers irregular plurals.
+        if (t === model || `${t}s` === model || `${model}s` === t || t === op.title.toLowerCase()) hit += 6;
         if (hit) matched++;
         score += hit;
       }
@@ -91,8 +102,12 @@ export class Catalog {
     });
 
     const all = scored.filter((s) => s.matched === tokens.length);
+    // Equal scores are common within one model (create/index/show/update/delete all mention it).
+    // Reads first, since most searches are looking for something to read, then alphabetical.
+    const methodRank = (m: string) => ["GET", "POST", "PUT", "DELETE"].indexOf(m);
     const hits = (all.length ? all : scored.filter((s) => s.score > 0)).sort(
-      (a, b) => b.score - a.score || a.op.id.localeCompare(b.op.id),
+      (a, b) =>
+        b.score - a.score || methodRank(a.op.method) - methodRank(b.op.method) || a.op.id.localeCompare(b.op.id),
     );
     return hits.slice(0, opts.limit ?? 15).map((s) => s.op);
   }
