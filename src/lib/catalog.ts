@@ -113,6 +113,12 @@ export class Catalog {
   }
 }
 
+/** The routes the docs show uploading a file (multipart) to. */
+const UPLOAD_ROUTE = /\/(upload_file|update_profile_picture|update_image|digitalresources\/upload)$/;
+/** Routes documented as returning a PDF/XLS/CSV or a stored file instead of JSON. */
+const DOWNLOAD_ROUTE =
+  /\/(download|export_pdf|export_transcript|gradereport|idcard)$|^\/dataslicerreports\/\([a-z_]+\)\/results$/;
+
 export function summarize(op: Operation): string {
   const desc = op.description ? ` ${op.description}` : "";
   return `${op.id}  ${op.method} ${op.path}${desc}`;
@@ -140,6 +146,16 @@ export function describe(op: Operation): string {
   if (op.expand.length) lines.push("", `Expandable (pass as \`expand\`): ${op.expand.join(", ")}`);
   if (op.filters.length) {
     lines.push("", "Filter conditions (use inside `filter`):", op.filters.map((f) => `${f.name} (${f.type})`).join(", "));
+  }
+  if (op.method !== "GET" && UPLOAD_ROUTE.test(op.path)) {
+    lines.push(
+      "",
+      "File upload: call populi_write with `files` (a path inside the files folder, or content_base64). " +
+        "The fields listed above go in `body` and are sent as the multipart `parameters` part.",
+    );
+  }
+  if (op.method === "GET" && DOWNLOAD_ROUTE.test(op.path)) {
+    lines.push("", "This route returns a file, not JSON. Use populi_download to save it to the files folder.");
   }
   lines.push("", `Docs: ${op.doc}`);
   return lines.join("\n");

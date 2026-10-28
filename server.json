@@ -3,7 +3,7 @@
   "name": "io.github.kisasa/populi-mcp",
   "title": "Populi",
   "description": "Populi API v2 for student information systems: search the API, read data, optionally write",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "repository": {
     "url": "https://github.com/kisasa/populi-mcp",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "npm",
       "identifier": "@kisasa/populi-mcp",
-      "version": "0.1.2",
+      "version": "0.2.0",
       "transport": {
         "type": "stdio"
       },
@@ -34,6 +34,15 @@
           "name": "POPULI_ALLOW_WRITES",
           "description": "Set to true to enable the populi_write tool (create, update, delete). Default is read-only",
           "default": "false"
+        },
+        {
+          "name": "POPULI_FILES_DIR",
+          "description": "Folder for downloads and uploads (the only place files are read from or written to). Default ~/populi-mcp-files"
+        },
+        {
+          "name": "POPULI_TIMEOUT_MS",
+          "description": "Per-request timeout in milliseconds, 1000 to 600000. Default 120000",
+          "default": "120000"
         }
       ]
     }

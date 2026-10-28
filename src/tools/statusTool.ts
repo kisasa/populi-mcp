@@ -24,6 +24,8 @@ export function registerStatusTool(server: McpServer, config: Config, client: Po
         `Key type: ${config.sandbox ? "sandbox (sk_sandbox_...)" : "live"}`,
         `Writes: ${config.allowWrites ? "enabled (populi_write available)" : "disabled (set POPULI_ALLOW_WRITES=true to enable)"}`,
         `API catalog: ${catalog.ops.length} routes`,
+        `Files folder: ${config.filesDir} (downloads are saved here${config.allowWrites ? ", uploads are read from here" : ""})`,
+        `Request timeout: ${Math.round(config.timeoutMs / 1000)}s`,
       ];
       if (verify) {
         try {

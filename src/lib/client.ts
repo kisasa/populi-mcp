@@ -1,3 +1,5 @@
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import type { Config } from "./config.js";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
@@ -16,10 +18,18 @@ export class PopuliError extends Error {
   }
 }
 
+export interface UploadFile {
+  /** Multipart field name. Populi's upload routes expect `file`. */
+  field: string;
+  filename: string;
+  contentType: string;
+  data: Uint8Array;
+}
+
 export type PopuliResponse =
   | { kind: "json"; status: number; data: unknown }
-  | { kind: "text"; status: number; contentType: string; text: string }
-  | { kind: "binary"; status: number; contentType: string; bytes: number };
+  | { kind: "text"; status: number; contentType: string; text: string; filename?: string }
+  | { kind: "binary"; status: number; contentType: string; data: Uint8Array; filename?: string };
 
 export interface RequestOptions {
   method: HttpMethod;
@@ -29,12 +39,30 @@ export interface RequestOptions {
    * Request parameters (filter, expand, page, limit, or a write body).
    * GET sends them as the `parameters` query value, since many HTTP stacks
    * (including fetch) cannot send a GET body. Everything else sends a JSON body.
+   * With `files` they travel as the multipart `parameters` field.
    */
   params?: Record<string, unknown>;
+  /** File uploads, sent as multipart/form-data. POST or PUT only. */
+  files?: UploadFile[];
+  /** Overrides the configured timeout for this one request. */
+  timeoutMs?: number;
+}
+
+type ClientConfig = Pick<Config, "baseUrl" | "apiKey" | "timeoutMs">;
+
+interface BodyGetInit {
+  method: string;
+  headers: Record<string, string>;
+  body?: string;
+  timeoutMs: number;
 }
 
 const RETRYABLE = new Set([502, 503, 504]);
-const TIMEOUT_MS = 30_000;
+/**
+ * A GET whose `parameters` would push the URL past this is sent with a JSON body instead.
+ * That is how Populi documents GET, and servers commonly refuse request lines beyond ~8 KB.
+ */
+export const MAX_GET_URL = 7000;
 
 /**
  * Reduces a caller-supplied path to a safe route under the configured base.
@@ -65,34 +93,76 @@ export function cleanPath(input: string): string {
 }
 
 export class PopuliClient {
+  /** Requests run one at a time: Populi allows a single heavy call (Data Slicer, exports) at once. */
+  private tail: Promise<unknown> = Promise.resolve();
+  /** After a 429 every later request waits it out locally instead of hammering a limited key. */
+  private blockedUntil = 0;
+
   constructor(
-    private readonly config: Pick<Config, "baseUrl" | "apiKey">,
+    private readonly config: ClientConfig,
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly bodyGet: (url: string, init: BodyGetInit) => Promise<Response> = nodeRequest,
   ) {}
 
-  async request({ method, path, params }: RequestOptions): Promise<PopuliResponse> {
+  request(opts: RequestOptions): Promise<PopuliResponse> {
+    const run = this.tail.then(
+      () => this.send(opts),
+      () => this.send(opts),
+    );
+    this.tail = run.catch(() => undefined);
+    return run;
+  }
+
+  private async send({ method, path, params, files, timeoutMs }: RequestOptions): Promise<PopuliResponse> {
+    this.assertNotRateLimited();
     let url = `${this.config.baseUrl}/${cleanPath(path)}`;
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.config.apiKey}`,
       Accept: "application/json",
     };
-    let body: string | undefined;
+    let body: string | FormData | undefined;
+    let getWithBody = false;
     const hasParams = params !== undefined && Object.keys(params).length > 0;
 
-    if (method === "GET") {
-      if (hasParams) url += `?${new URLSearchParams({ parameters: JSON.stringify(params) })}`;
+    if (files?.length) {
+      if (method === "GET" || method === "DELETE") throw new PopuliError(`File uploads need POST or PUT, not ${method}.`);
+      const form = new FormData();
+      for (const f of files) form.append(f.field, new Blob([f.data as BlobPart], { type: f.contentType }), f.filename);
+      // Populi reads the non-file parameters from a `parameters` field holding JSON
+      if (hasParams) form.append("parameters", JSON.stringify(params));
+      body = form; // no Content-Type: fetch adds the multipart boundary itself
+    } else if (method === "GET") {
+      if (hasParams) {
+        const query = new URLSearchParams({ parameters: JSON.stringify(params) }).toString();
+        if (url.length + query.length + 1 > MAX_GET_URL) {
+          getWithBody = true;
+          headers["Content-Type"] = "application/json";
+          body = JSON.stringify(params);
+        } else {
+          url += `?${query}`;
+        }
+      }
     } else {
       // Populi answers 400 invalid_json to a POST without this, even for an empty body.
       headers["Content-Type"] = "application/json";
       body = JSON.stringify(params ?? {});
     }
 
+    const timeout = timeoutMs ?? this.config.timeoutMs;
     const attempts = method === "GET" ? 3 : 1; // never replay a write
     for (let attempt = 1; ; attempt++) {
       let res: Response;
       try {
-        res = await this.fetchImpl(url, { method, headers, body, signal: AbortSignal.timeout(TIMEOUT_MS) });
+        res = getWithBody
+          ? await this.bodyGet(url, { method, headers, body: body as string, timeoutMs: timeout })
+          : await this.fetchImpl(url, { method, headers, body, signal: AbortSignal.timeout(timeout) });
       } catch (err) {
+        if (isTimeout(err)) {
+          throw new PopuliError(
+            `Populi did not answer within ${Math.round(timeout / 1000)}s. For slow reports and exports raise ` +
+              "`timeout_ms` on the call (or POPULI_TIMEOUT_MS), and check the MCP client's own tool timeout too.",
+          );
+        }
         if (attempt < attempts) {
           await sleep(500 * attempt);
           continue;
@@ -104,6 +174,19 @@ export class PopuliClient {
         continue;
       }
       return this.parse(res);
+    }
+  }
+
+  private assertNotRateLimited(): void {
+    const remaining = Math.ceil((this.blockedUntil - Date.now()) / 1000);
+    if (remaining > 0) {
+      throw new PopuliError(
+        `Still inside Populi's rate-limit window (HTTP 429 earlier). Wait about ${remaining}s; no request was sent.`,
+        429,
+        undefined,
+        undefined,
+        remaining,
+      );
     }
   }
 
@@ -130,12 +213,12 @@ export class PopuliClient {
         return { kind: "text", status: res.status, contentType, text: raw };
       }
     }
+    const filename = filenameFrom(res.headers.get("content-disposition"));
     // File downloads (CSV, XLS, PDF, images) come back as the file itself.
     if (/^text\/|csv|xml/i.test(contentType)) {
-      return { kind: "text", status: res.status, contentType, text: await res.text() };
+      return { kind: "text", status: res.status, contentType, text: await res.text(), filename };
     }
-    const buf = await res.arrayBuffer();
-    return { kind: "binary", status: res.status, contentType, bytes: buf.byteLength };
+    return { kind: "binary", status: res.status, contentType, data: new Uint8Array(await res.arrayBuffer()), filename };
   }
 
   private toError(res: Response, body: unknown): PopuliError {
@@ -151,6 +234,7 @@ export class PopuliClient {
     const retryHeader = Number(res.headers.get("retry-after"));
     if (res.status === 429) {
       const retryAfter = Number.isFinite(retryHeader) && retryHeader > 0 ? retryHeader : 65;
+      this.blockedUntil = Date.now() + retryAfter * 1000;
       return new PopuliError(
         `Populi rate limit hit (HTTP 429). Wait about ${retryAfter}s before the next call. ` +
           "Limits are 50 requests/min (3AM-7PM PST) and 100/min (7PM-3AM PST) per key.",
@@ -174,6 +258,25 @@ export class PopuliClient {
   }
 }
 
+function isTimeout(err: unknown): boolean {
+  return err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+}
+
+/** The file name Populi suggests for a download, from Content-Disposition. */
+export function filenameFrom(header: string | null): string | undefined {
+  if (!header) return undefined;
+  const star = header.match(/filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1]!.trim());
+    } catch {
+      // fall through to the plain form
+    }
+  }
+  const plain = header.match(/filename\s*=\s*(?:"([^"]*)"|([^;]+))/);
+  return (plain?.[1] ?? plain?.[2])?.trim() || undefined;
+}
+
 /**
  * Node's fetch reports every network failure as a bare "fetch failed" and keeps the useful part
  * (ENOTFOUND, ECONNREFUSED, a certificate error) on `cause`. Surface it, or a wrong host name
@@ -187,6 +290,44 @@ export function describeFetchError(err: unknown): string {
   const detail = cause.message || cause.errors?.[0]?.message;
   const parts = [cause.code && !detail?.includes(cause.code) ? cause.code : undefined, detail].filter(Boolean);
   return parts.length ? `${err.message} (${parts.join(": ")})` : err.message;
+}
+
+/**
+ * A GET with a JSON body. fetch refuses to send one, but Populi documents it as the normal way to
+ * pass parameters, and it has no URL length limit.
+ */
+export function nodeRequest(url: string, init: BodyGetInit): Promise<Response> {
+  const target = new URL(url);
+  const send = target.protocol === "https:" ? httpsRequest : httpRequest;
+  return new Promise((resolve, reject) => {
+    const headers = { ...init.headers };
+    if (init.body !== undefined) headers["Content-Length"] = String(Buffer.byteLength(init.body));
+    const req = send(target, { method: init.method, headers, timeout: init.timeoutMs }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (c: Buffer) => chunks.push(c));
+      res.on("error", reject);
+      res.on("end", () => {
+        const out = new Headers();
+        for (const [k, v] of Object.entries(res.headers)) {
+          if (Array.isArray(v)) v.forEach((x) => out.append(k, x));
+          else if (v !== undefined) out.set(k, v);
+        }
+        const status = res.statusCode ?? 502;
+        const empty = status === 204 || status === 205 || status === 304;
+        resolve(
+          new Response(empty ? null : (Buffer.concat(chunks) as unknown as BodyInit), {
+            status,
+            statusText: res.statusMessage,
+            headers: out,
+          }),
+        );
+      });
+    });
+    req.on("timeout", () => req.destroy(Object.assign(new Error("timeout"), { name: "TimeoutError" })));
+    req.on("error", reject);
+    if (init.body !== undefined) req.write(init.body);
+    req.end();
+  });
 }
 
 function sleep(ms: number): Promise<void> {
