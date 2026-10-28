@@ -3,7 +3,7 @@
   "name": "io.github.kisasa/populi-mcp",
   "title": "Populi",
   "description": "Populi API v2 for student information systems: search the API, read data, optionally write",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "repository": {
     "url": "https://github.com/kisasa/populi-mcp",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "npm",
       "identifier": "@kisasa/populi-mcp",
-      "version": "0.1.2",
+      "version": "0.2.0",
       "transport": {
         "type": "stdio"
       },
