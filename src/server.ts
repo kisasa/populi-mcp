@@ -13,7 +13,9 @@ Workflow: populi_search_api to find a route, populi_describe_api for its paramet
 - List routes return at most 200 records per page and the key is limited to about 50 requests per minute, so filter on the server side (\`filter\`) instead of paging everything.
 - Many routes need a path id (e.g. /people/{id}); replace placeholders such as (person) with real ids.
 - Fetching a person returns their record, not their contact details, unless you pass expand (e.g. email_addresses, phone_numbers).
-- Records can contain sensitive student data (SSNs, birthdates, grades, financial aid). Request only the fields and expands you need.`;
+- Records can contain sensitive student data (SSNs, birthdates, grades, financial aid). Request only the fields and expands you need.
+- Routes that return files (PDF/XLS/CSV exports, transcripts, Data Slicer results, file downloads) need populi_download, which saves into the files folder. all_pages with populi_download also keeps a large export out of the conversation.
+- Requests run one at a time (Populi allows a single heavy call at once). If the key is rate limited, later calls fail fast with the wait time instead of retrying; a partly fetched all_pages returns what it got and a next_page to resume from.`;
 
 export function createServer(config: Config, version: string, deps: { client?: PopuliClient; catalog?: Catalog } = {}): McpServer {
   const client = deps.client ?? new PopuliClient(config);
@@ -23,15 +25,15 @@ export function createServer(config: Config, version: string, deps: { client?: P
     { name: "populi-mcp", version },
     {
       instructions: config.allowWrites
-        ? `${INSTRUCTIONS}\n- Writes are enabled: populi_write changes live data. Confirm with the user before create, update or delete calls.`
+        ? `${INSTRUCTIONS}\n- Writes are enabled: populi_write changes live data, and uploads files from the files folder. Confirm with the user before create, update or delete calls.`
         : `${INSTRUCTIONS}\n- This server is read-only; creating, updating and deleting records is disabled.`,
     },
   );
 
   registerStatusTool(server, config, client, catalog);
   registerCatalogTools(server, catalog);
-  registerReadTools(server, client);
-  if (config.allowWrites) registerWriteTools(server, client, catalog);
+  registerReadTools(server, client, config);
+  if (config.allowWrites) registerWriteTools(server, client, catalog, config);
 
   return server;
 }

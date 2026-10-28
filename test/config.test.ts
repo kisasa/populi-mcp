@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig, normalizeBaseUrl } from "../src/lib/config.js";
 
@@ -48,5 +50,19 @@ describe("loadConfig", () => {
 
   it.each(["0", "false", "", "nope"])("keeps writes off for POPULI_ALLOW_WRITES=%j", (v) => {
     expect(loadConfig({ ...env, POPULI_ALLOW_WRITES: v }).allowWrites).toBe(false);
+  });
+
+  it("defaults the files folder under the home directory and lets POPULI_FILES_DIR move it", () => {
+    expect(loadConfig(env).filesDir).toBe(join(homedir(), "populi-mcp-files"));
+    expect(loadConfig({ ...env, POPULI_FILES_DIR: join(homedir(), "elsewhere") }).filesDir).toBe(join(homedir(), "elsewhere"));
+    expect(loadConfig({ ...env, POPULI_FILES_DIR: "  " }).filesDir).toBe(join(homedir(), "populi-mcp-files"));
+  });
+
+  it("defaults the timeout to two minutes and validates POPULI_TIMEOUT_MS", () => {
+    expect(loadConfig(env).timeoutMs).toBe(120_000);
+    expect(loadConfig({ ...env, POPULI_TIMEOUT_MS: "300000" }).timeoutMs).toBe(300_000);
+    for (const bad of ["abc", "10", "0", "-5", "1.5", "9999999"]) {
+      expect(() => loadConfig({ ...env, POPULI_TIMEOUT_MS: bad })).toThrow(ConfigError);
+    }
   });
 });

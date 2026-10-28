@@ -1,10 +1,83 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { PopuliClient } from "../lib/client.js";
-import { DEFAULT_MAX_CHARS, fail, json, ok, renderResponse } from "../lib/format.js";
+import type { PopuliClient, PopuliResponse } from "../lib/client.js";
+import type { Config } from "../lib/config.js";
+import { DEFAULT_MAX_CHARS, fail, MAX_MAX_CHARS, ok, renderResponse, saveResponse } from "../lib/format.js";
 import { fetchAllPages } from "../lib/paginate.js";
 
-export function registerReadTools(server: McpServer, client: PopuliClient): void {
+const FILTER_EXAMPLE =
+  '{"0":{"logic":"ALL","fields":[{"name":"first_name","value":{"type":"CONTAINS","text":"john"},"positive":1}]}}';
+
+/** Everything that decides which GET to make, shared by populi_get and populi_download. */
+const requestShape = {
+  path: z.string().min(1).describe("Route under /api2, with real ids, e.g. /people/24469940/leads"),
+  filter: z.record(z.string(), z.unknown()).optional().describe("Populi filter object (list routes)"),
+  expand: z.array(z.string()).optional().describe("Related properties to include"),
+  page: z.number().int().min(1).optional().describe("Page of results, 1-based. With all_pages, the page to start from"),
+  limit: z.number().int().min(1).max(200).optional().describe("Records per page"),
+  params: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe("Any other documented parameters for the route (sort, report options, format, ...)"),
+  all_pages: z.boolean().default(false).describe("Follow pagination and merge every page into one list"),
+  max_records: z
+    .number()
+    .int()
+    .min(1)
+    .max(1_000_000)
+    .default(500)
+    .describe(
+      "With all_pages: stop once at least this many records are collected (the last page is kept whole). " +
+        "The result says whether it finished and, if not, the next_page to continue from",
+    ),
+  timeout_ms: z
+    .number()
+    .int()
+    .min(1000)
+    .max(600_000)
+    .optional()
+    .describe("Per-request timeout. Raise for slow reports and exports (default 120000)"),
+};
+const requestObject = z.object(requestShape);
+type RequestArgs = z.infer<typeof requestObject>;
+
+function buildParams(a: RequestArgs): Record<string, unknown> {
+  const base: Record<string, unknown> = { ...a.params };
+  if (a.filter) base.filter = a.filter;
+  if (a.expand?.length) base.expand = a.expand;
+  if (a.limit) base.limit = a.limit;
+  if (a.page && !a.all_pages) base.page = a.page;
+  return base;
+}
+
+/** One GET, or every page merged into one list object. Non-list responses pass through untouched. */
+async function fetchRequested(client: PopuliClient, a: RequestArgs): Promise<PopuliResponse> {
+  const params = buildParams(a);
+  if (!a.all_pages) return client.request({ method: "GET", path: a.path, params, timeoutMs: a.timeout_ms });
+
+  const paged = await fetchAllPages(client, a.path, params, {
+    startPage: a.page ?? 1,
+    maxRecords: a.max_records,
+    pageSize: a.limit,
+    timeoutMs: a.timeout_ms,
+  });
+  if (paged.kind === "single") return paged.response;
+  return {
+    kind: "json",
+    status: 200,
+    data: {
+      object: "list",
+      results: paged.records.length,
+      complete: paged.complete,
+      pages_fetched: paged.pagesFetched,
+      ...(paged.nextPage !== undefined ? { next_page: paged.nextPage } : {}),
+      ...(paged.error ? { error: paged.error } : {}),
+      data: paged.records,
+    },
+  };
+}
+
+export function registerReadTools(server: McpServer, client: PopuliClient, config: Pick<Config, "filesDir">): void {
   server.registerTool(
     "populi_get",
     {
@@ -13,63 +86,57 @@ export function registerReadTools(server: McpServer, client: PopuliClient): void
         "GET any Populi API v2 route (read-only). Path is under /api2, e.g. /people/123, /academicterms, " +
         "/people/123/leads. Lists return up to 200 records per page; use `page`, `limit`, or `all_pages`. " +
         "Use `expand` to inline related records (see populi_describe_api for the allowed names) and `filter` " +
-        "to narrow lists. A filter looks like " +
-        '{"0":{"logic":"ALL","fields":[{"name":"first_name","value":{"type":"CONTAINS","text":"john"},"positive":1}]}}. ' +
-        "Populi allows about 50 requests/min per key, so prefer one filtered call over many unfiltered ones.",
+        `to narrow lists. A filter looks like ${FILTER_EXAMPLE}. ` +
+        "Populi allows about 50 requests/min per key, so prefer one filtered call over many unfiltered ones. " +
+        "Routes that return a file (PDF/XLS exports, transcripts, Data Slicer results, file downloads) can't be " +
+        "shown here: use populi_download for those. If a rate limit stops all_pages part-way, the pages already " +
+        "fetched are returned with a next_page to resume from.",
       inputSchema: {
-        path: z.string().min(1).describe("Route under /api2, with real ids, e.g. /people/24469940/leads"),
-        filter: z.record(z.string(), z.unknown()).optional().describe("Populi filter object (list routes)"),
-        expand: z.array(z.string()).optional().describe("Related properties to include"),
-        page: z.number().int().min(1).optional().describe("Page of results, 1-based"),
-        limit: z.number().int().min(1).max(200).optional().describe("Records per page"),
-        params: z
-          .record(z.string(), z.unknown())
-          .optional()
-          .describe("Any other documented parameters for the route (sort, report options, ...)"),
-        all_pages: z.boolean().default(false).describe("Follow pagination and merge every page into one list"),
-        max_records: z
-          .number()
-          .int()
-          .min(1)
-          .max(5000)
-          .default(500)
-          .describe("Cap for all_pages, to bound the number of requests"),
+        ...requestShape,
         max_chars: z
           .number()
           .int()
           .min(1000)
-          .max(200_000)
+          .max(MAX_MAX_CHARS)
           .default(DEFAULT_MAX_CHARS)
           .describe("Truncate the response text beyond this many characters"),
       },
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     },
-    async ({ path, filter, expand, page, limit, params, all_pages, max_records, max_chars }) => {
+    async ({ max_chars, ...args }) => {
       try {
-        const base: Record<string, unknown> = { ...params };
-        if (filter) base.filter = filter;
-        if (expand?.length) base.expand = expand;
-        if (limit) base.limit = limit;
-        if (page && !all_pages) base.page = page;
+        return ok(renderResponse(await fetchRequested(client, args), max_chars));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
 
-        if (!all_pages) {
-          return ok(renderResponse(await client.request({ method: "GET", path, params: base }), max_chars));
-        }
-
-        const paged = await fetchAllPages(client, path, base, { startPage: page ?? 1, maxRecords: max_records, pageSize: limit });
-        if (paged.kind === "single") return ok(renderResponse(paged.response, max_chars));
-        return ok(
-          json(
-            {
-              object: "list",
-              results: paged.records.length,
-              complete: paged.complete,
-              pages_fetched: paged.pagesFetched,
-              data: paged.records,
-            },
-            max_chars,
-          ),
-        );
+  server.registerTool(
+    "populi_download",
+    {
+      title: "Download from Populi to a file",
+      description:
+        "GET a Populi route and save the response to a file in the files folder instead of returning it. " +
+        "Use it for routes that return files (PDF/XLS/CSV exports, transcripts and grade reports, Data Slicer " +
+        "results, file and backup downloads, images) and to keep a big list or full export out of the " +
+        "conversation (use all_pages). Takes the same arguments as populi_get. Never overwrites: an existing " +
+        "name gets -1, -2, ... appended. Returns the saved path and a short preview.",
+      inputSchema: {
+        ...requestShape,
+        save_as: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("File name to save under (no folders). Defaults to the name Populi suggests, or a timestamp"),
+      },
+      // writes only new files, only inside the files folder, and never overwrites
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ save_as, ...args }) => {
+      try {
+        const res = await fetchRequested(client, args);
+        return ok(await saveResponse(res, { filesDir: config.filesDir, name: save_as }));
       } catch (err) {
         return fail(err);
       }
