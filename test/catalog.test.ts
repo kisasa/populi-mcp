@@ -23,6 +23,18 @@ describe("bundled catalog", () => {
     expect(hits.every((o) => o.method === "DELETE")).toBe(true);
   });
 
+  it("ranks the model a word names above models that merely contain it", () => {
+    // 'application' is a substring of 'aidapplications', which sorts first alphabetically
+    expect(catalog.search("application")[0]!.model).toBe("applications");
+    expect(catalog.search("person")[0]!.model).toBe("people");
+  });
+
+  it("indexes filter and parameter names so extra words narrow the results", () => {
+    const hits = catalog.search("application status", { limit: 5 });
+    expect(hits[0]!.id).toBe("applications.index");
+    expect(hits.slice(0, 3).every((o) => o.model === "applications")).toBe(true);
+  });
+
   it("ranks an exact id first", () => {
     expect(catalog.search("people.create")[0]!.id).toBe("people.create");
   });

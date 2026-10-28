@@ -97,8 +97,7 @@ export class PopuliClient {
           await sleep(500 * attempt);
           continue;
         }
-        const reason = err instanceof Error ? err.message : String(err);
-        throw new PopuliError(`Could not reach Populi at ${this.config.baseUrl}: ${reason}`);
+        throw new PopuliError(`Could not reach Populi at ${this.config.baseUrl}: ${describeFetchError(err)}`);
       }
       if (RETRYABLE.has(res.status) && attempt < attempts) {
         await sleep(500 * attempt);
@@ -173,6 +172,21 @@ export class PopuliClient {
       body,
     );
   }
+}
+
+/**
+ * Node's fetch reports every network failure as a bare "fetch failed" and keeps the useful part
+ * (ENOTFOUND, ECONNREFUSED, a certificate error) on `cause`. Surface it, or a wrong host name
+ * looks the same as a dead network.
+ */
+export function describeFetchError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = err.cause as (Error & { code?: string; errors?: Error[] }) | undefined;
+  if (!(cause instanceof Error)) return err.message;
+  // On dual-stack hosts a refused connection arrives as an AggregateError with no message of its own
+  const detail = cause.message || cause.errors?.[0]?.message;
+  const parts = [cause.code && !detail?.includes(cause.code) ? cause.code : undefined, detail].filter(Boolean);
+  return parts.length ? `${err.message} (${parts.join(": ")})` : err.message;
 }
 
 function sleep(ms: number): Promise<void> {
