@@ -1,6 +1,6 @@
 {
   "name": "@kisasa/populi-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for the Populi API v2: search the API catalog, read people, admissions, academics and billing data, and optionally write",
   "mcpName": "io.github.kisasa/populi-mcp",
   "main": "dist/index.js",
