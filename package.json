@@ -1,0 +1,61 @@
+{
+  "name": "@kisasa/populi-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for the Populi API v2: search the API catalog, read people, admissions, academics and billing data, and optionally write",
+  "mcpName": "io.github.kisasa/populi-mcp",
+  "main": "dist/index.js",
+  "bin": {
+    "populi-mcp": "dist/index.js"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "data",
+    "server.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc && node scripts/chmod-bin.mjs",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build:catalog": "node scripts/build-catalog.mjs",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "populi",
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "sis",
+    "student-information-system",
+    "higher-education",
+    "claude",
+    "codex",
+    "cursor"
+  ],
+  "author": "Kisasa",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kisasa/populi-mcp.git"
+  },
+  "homepage": "https://github.com/kisasa/populi-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/kisasa/populi-mcp/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.5"
+  }
+}

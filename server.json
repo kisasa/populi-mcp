@@ -1,0 +1,41 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.kisasa/populi-mcp",
+  "title": "Populi",
+  "description": "Populi API v2 for student information systems: search the API, read people, admissions, academics and billing data, optionally write",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/kisasa/populi-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/kisasa/populi-mcp#readme",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@kisasa/populi-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "POPULI_BASE_URL",
+          "description": "Your Populi instance URL, with or without the /api2 suffix",
+          "placeholder": "https://yourschool.populiweb.com",
+          "isRequired": true
+        },
+        {
+          "name": "POPULI_API_KEY",
+          "description": "Populi API key token (Account & Settings > API > Keys). Use an sk_sandbox_ key against a sandbox instance while evaluating",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "POPULI_ALLOW_WRITES",
+          "description": "Set to true to enable the populi_write tool (create, update, delete). Default is read-only",
+          "default": "false"
+        }
+      ]
+    }
+  ]
+}

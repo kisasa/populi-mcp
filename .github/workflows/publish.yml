@@ -1,0 +1,135 @@
+name: Publish
+
+# Runs on every push to main (including merged PRs). It only publishes when the
+# version in package.json is new: merges without a version bump are a no-op.
+#
+# To release: bump "version" in package.json and both "version" fields in
+# server.json, then merge to main.
+#
+# npm auth: npm trusted publishing (OIDC) if configured for this repo/workflow
+# on npmjs.com, otherwise the NPM_TOKEN repository secret.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the version tag and GitHub release
+  id-token: write # npm trusted publishing/provenance and MCP Registry login
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Update npm (trusted publishing needs npm 11.5.1+)
+        run: npm install -g npm@latest
+
+      - name: Check versions and what still needs publishing
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+
+          # server.json must match package.json, or the MCP Registry rejects it
+          node -e '
+            const p = require("./package.json"), s = require("./server.json");
+            const errs = [];
+            if (s.name !== p.mcpName) errs.push(`server.json name "${s.name}" != package.json mcpName "${p.mcpName}"`);
+            if (s.version !== p.version) errs.push(`server.json version ${s.version} != package.json version ${p.version}`);
+            for (const pkg of s.packages ?? []) {
+              if (pkg.identifier !== p.name) errs.push(`server.json packages[].identifier "${pkg.identifier}" != package.json name "${p.name}"`);
+              if (pkg.version !== p.version) errs.push(`server.json packages[].version ${pkg.version} != package.json version ${p.version}`);
+            }
+            if (errs.length) { console.error(errs.join("\n")); process.exit(1); }
+          '
+
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "npm: $NAME@$VERSION already published"
+            echo "npm=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm: $NAME@$VERSION will be published"
+            echo "npm=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          # The GitHub release is created last, so it marks a completed release
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "release: v$VERSION already exists"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release: v$VERSION will be published to the MCP Registry and released"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install
+        if: steps.plan.outputs.npm == 'true'
+        run: npm ci
+
+      - name: Build
+        if: steps.plan.outputs.npm == 'true'
+        run: npm run build
+
+      - name: Test
+        if: steps.plan.outputs.npm == 'true'
+        run: npm test
+
+
+      - name: Publish to npm
+        if: steps.plan.outputs.npm == 'true'
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Wait for npm to serve the new version
+        if: steps.plan.outputs.release == 'true'
+        run: |
+          # npm can hold a new version in processing for ~10 minutes before serving it
+          for i in $(seq 1 120); do
+            if npm view "${{ steps.plan.outputs.name }}@${{ steps.plan.outputs.version }}" version >/dev/null 2>&1; then
+              exit 0
+            fi
+            echo "Waiting for npm ($i/120)..."
+            sleep 10
+          done
+          echo "${{ steps.plan.outputs.name }}@${{ steps.plan.outputs.version }} is not on npm" >&2
+          exit 1
+
+      - name: Install mcp-publisher
+        if: steps.plan.outputs.release == 'true'
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Publish to MCP Registry
+        if: steps.plan.outputs.release == 'true'
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+
+      - name: Create GitHub release
+        if: steps.plan.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.plan.outputs.version }}" \
+            --target "$GITHUB_SHA" \
+            --title "v${{ steps.plan.outputs.version }}" \
+            --generate-notes
