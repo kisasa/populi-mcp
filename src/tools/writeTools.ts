@@ -22,8 +22,9 @@ export function registerWriteTools(
   server: McpServer,
   client: PopuliClient,
   catalog: Catalog,
-  config: Pick<Config, "filesDir">,
+  config: Pick<Config, "filesDir" | "filesMode">,
 ): void {
+  const inline = config.filesMode === "inline";
   server.registerTool(
     "populi_write",
     {
@@ -34,8 +35,11 @@ export function registerWriteTools(
         "Look the route up with populi_describe_api first and send exactly the documented body fields. " +
         "Action parameters go under an `actions` key inside `body`. " +
         "To upload a file (e.g. POST /people/{id}/upload_file, /people/{id}/update_profile_picture), pass `files`; " +
-        "the other fields then travel in the multipart `parameters` part. Files must be inside the files folder, " +
-        "or be passed as base64. Confirm destructive or bulk changes with the user before calling.",
+        "the other fields then travel in the multipart `parameters` part. " +
+        (inline
+          ? "Files must be passed as base64 in content_base64 (this server has no local files folder). "
+          : "Files must be inside the files folder, or be passed as base64. ") +
+        "Confirm destructive or bulk changes with the user before calling.",
       inputSchema: {
         method: z.enum(["POST", "PUT", "DELETE"]).describe("POST = create, PUT = update, DELETE = remove"),
         path: z.string().min(1).describe("Route under /api2 with real ids, e.g. /people/24469752/emailaddresses/21648043"),
@@ -53,7 +57,9 @@ export function registerWriteTools(
     },
     async ({ method, path, body, files, timeout_ms }) => {
       try {
-        const uploads = files?.length ? await Promise.all(files.map((f) => readUpload(config.filesDir, f))) : undefined;
+        const uploads = files?.length
+          ? await Promise.all(files.map((f) => readUpload(inline ? undefined : config.filesDir, f)))
+          : undefined;
         const op = catalog.match(method, path);
         const res = await client.request({ method, path, params: body, files: uploads, timeoutMs: timeout_ms });
         const note = op

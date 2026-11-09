@@ -2,7 +2,7 @@
 
 MCP server for the [Populi](https://populi.co/api) API v2. It lets Claude, Codex, Cursor and any other [Model Context Protocol](https://modelcontextprotocol.io) client look up people, admissions, academics and billing data in your Populi instance, and, if you opt in, make changes.
 
-**Package:** `@kisasa/populi-mcp` on npm. **Command:** `populi-mcp`. **Transport:** stdio.
+**Package:** `@kisasa/populi-mcp` on npm. **Command:** `populi-mcp`. **Transports:** stdio (local, the default) or Streamable HTTP with sign-in (`--http`, for [Claude and ChatGPT connectors](#hosted-server-claude-and-chatgpt-connectors)).
 
 ## How it works
 
@@ -125,6 +125,74 @@ Run `npx -y @kisasa/populi-mcp` as a stdio server with `POPULI_BASE_URL` and `PO
 ### More than one instance
 
 Add one entry per instance under different names (`populi-sandbox`, `populi-live`), each with its own key.
+
+## Hosted server (Claude and ChatGPT connectors)
+
+The stdio server above runs on each person's computer. To let a whole staff use Populi from Claude or ChatGPT (including the web and mobile apps, which can only reach remote servers), run the same code as a hosted server with `--http` and add it as a **custom connector**.
+
+Each person signs in with **their own Populi API key**, so every request runs with that person's Populi permissions and rate limit. A key never has to be shared, and the operator holds no credentials: the key lives only inside an encrypted token that the person's AI app stores.
+
+```
+        Claude / ChatGPT  ──OAuth + MCP over HTTPS──▶  populi-mcp --http  ──▶  Populi
+   (person clicks Connect, pastes their key once)     (stateless, no database)
+```
+
+### How sign-in works
+
+1. The app discovers the server (`/.well-known/oauth-...`) and registers itself (RFC 7591), then sends the person to `/authorize`.
+2. That page asks for their Populi API key (and instance address, unless the deployment pins one), checks it with one live request, and optionally lets them opt in to writes.
+3. The server returns an authorization code; the app trades it (with PKCE) for a one-hour access token and a 30-day refresh token. Both are AES-256-GCM sealed copies of the person's credentials, so the server stores nothing and any instance can serve any request.
+
+### Run it
+
+```bash
+docker build -t populi-mcp .
+docker run -p 8080:8080 \
+  -e POPULI_MCP_SECRET="$(openssl rand -base64 48)" \
+  -e POPULI_BASE_URL=https://yourschool.populiweb.com \
+  -e POPULI_MCP_PUBLIC_URL=https://mcp.yourschool.edu \
+  populi-mcp
+```
+
+Without Docker: `POPULI_MCP_SECRET=... npx -y @kisasa/populi-mcp --http`. The connector URL is the public address plus `/mcp`. It must be served over HTTPS (put it behind a load balancer, CloudFront, a reverse proxy, or run it on Lambda below).
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `POPULI_MCP_SECRET` | yes | 32+ random characters. Seals every token. Changing it signs everyone out, so keep a copy. |
+| `POPULI_MCP_PREVIOUS_SECRETS` | no | Comma-separated older secrets that still open tokens, for rotation: put the new secret in `POPULI_MCP_SECRET` and the old one here. |
+| `POPULI_MCP_PUBLIC_URL` | recommended | The `https://` address people use. If unset it is derived from the request (`x-forwarded-proto`/`host`), which suits a bare Lambda function URL but not a custom domain in front of it. |
+| `POPULI_BASE_URL` | no | Pin everyone to one Populi instance; the connect page then asks only for a key. Tokens for any other instance stop working. |
+| `POPULI_ALLOWED_HOSTS` | no | When the instance is *not* pinned, the hostname suffixes people may enter. Default `populiweb.com,populi.co`. This keeps the server from being pointed at arbitrary sites. |
+| `POPULI_ALLOW_WRITES` | no | `true` lets each person tick an "allow changes" box when connecting. Reads only otherwise, and unticked people stay read-only. |
+| `POPULI_ALLOWED_REDIRECTS` | no | Where sign-in may send people back to: `scheme://host` entries or `scheme:`. Default: claude.ai, claude.com, chatgpt.com, chat.openai.com, platform.openai.com, localhost, 127.0.0.1, and the cursor/vscode schemes. |
+| `POPULI_TIMEOUT_MS` | no | As above. |
+| `PORT` | no | Default `8080`. |
+
+### Add it as a connector
+
+- **Claude** (claude.ai or Desktop): Settings > Connectors > Add custom connector, paste `https://<your address>/mcp`. On Team and Enterprise plans an owner adds it once and each member then clicks **Connect** and signs in themselves.
+- **ChatGPT**: Settings > Connectors (or Apps), enable developer mode if your workspace requires it, create a connector with the same URL, and choose OAuth. Workspace admins may need to allow custom connectors first.
+- **Claude Code**: `claude mcp add --transport http populi https://<your address>/mcp`, then run `/mcp` to sign in.
+
+### Deploy on AWS Lambda
+
+`deploy/aws-lambda/template.yaml` is a [SAM](https://docs.aws.amazon.com/serverless-application-model/) template: one container-image function with a function URL (no API Gateway, so there is no 30-second limit on slow Populi reports). The [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) already in the image runs the HTTP server unchanged.
+
+```bash
+cd deploy/aws-lambda
+sam build
+sam deploy --guided   # asks for TokenSecret, optional PopuliBaseUrl / PublicUrl, AllowWrites
+```
+
+The `FunctionUrl` output plus `/mcp` is the connector address. For a branded address, put CloudFront (or another HTTPS front end) in front and set `PublicUrl` to it. At school-sized usage the hosting cost is typically a few dollars a month or less.
+
+### What differs from the local server
+
+- **Files.** There is no local files folder. `populi_download` returns text and JSON in full and attaches a file to the result (up to 4 MB); `populi_write` uploads take `content_base64` only (the request body is limited to about 5 MB).
+- **No sessions.** Every request is self-contained, so scaling and restarts are invisible. A warm instance still keeps each person's one-at-a-time queue and 429 backoff.
+- **Revoking access.** Tokens can't be listed or revoked individually. Delete the person's key in Populi (the immediate fix), or rotate `POPULI_MCP_SECRET` to sign everyone out.
+- **Authorization codes** are not single-use (no database to track them), but they last five minutes and need the PKCE verifier only the connecting app holds.
+- **Logs** contain method, path, status and duration only: never bodies, tokens or keys.
 
 ## API behaviors worth knowing
 

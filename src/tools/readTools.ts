@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { PopuliClient, PopuliResponse } from "../lib/client.js";
 import type { Config } from "../lib/config.js";
-import { DEFAULT_MAX_CHARS, fail, MAX_MAX_CHARS, ok, renderResponse, saveResponse } from "../lib/format.js";
+import { DEFAULT_MAX_CHARS, fail, inlineResponse, MAX_MAX_CHARS, ok, renderResponse, saveResponse } from "../lib/format.js";
 import { fetchAllPages } from "../lib/paginate.js";
 
 const FILTER_EXAMPLE =
@@ -77,7 +77,8 @@ async function fetchRequested(client: PopuliClient, a: RequestArgs): Promise<Pop
   };
 }
 
-export function registerReadTools(server: McpServer, client: PopuliClient, config: Pick<Config, "filesDir">): void {
+export function registerReadTools(server: McpServer, client: PopuliClient, config: Pick<Config, "filesDir" | "filesMode">): void {
+  const inline = config.filesMode === "inline";
   server.registerTool(
     "populi_get",
     {
@@ -115,13 +116,16 @@ export function registerReadTools(server: McpServer, client: PopuliClient, confi
   server.registerTool(
     "populi_download",
     {
-      title: "Download from Populi to a file",
-      description:
-        "GET a Populi route and save the response to a file in the files folder instead of returning it. " +
-        "Use it for routes that return files (PDF/XLS/CSV exports, transcripts and grade reports, Data Slicer " +
-        "results, file and backup downloads, images) and to keep a big list or full export out of the " +
-        "conversation (use all_pages). Takes the same arguments as populi_get. Never overwrites: an existing " +
-        "name gets -1, -2, ... appended. Returns the saved path and a short preview.",
+      title: inline ? "Download a file from Populi" : "Download from Populi to a file",
+      description: inline
+        ? "GET a Populi route that returns a file (PDF/XLS/CSV exports, transcripts and grade reports, Data Slicer " +
+          "results, file downloads, images) and return it attached to the result, up to 4 MB. Text and JSON " +
+          "responses come back in full as text. Takes the same arguments as populi_get."
+        : "GET a Populi route and save the response to a file in the files folder instead of returning it. " +
+          "Use it for routes that return files (PDF/XLS/CSV exports, transcripts and grade reports, Data Slicer " +
+          "results, file and backup downloads, images) and to keep a big list or full export out of the " +
+          "conversation (use all_pages). Takes the same arguments as populi_get. Never overwrites: an existing " +
+          "name gets -1, -2, ... appended. Returns the saved path and a short preview.",
       inputSchema: {
         ...requestShape,
         save_as: z
@@ -136,6 +140,7 @@ export function registerReadTools(server: McpServer, client: PopuliClient, confi
     async ({ save_as, ...args }) => {
       try {
         const res = await fetchRequested(client, args);
+        if (inline) return inlineResponse(res, { name: save_as });
         return ok(await saveResponse(res, { filesDir: config.filesDir, name: save_as }));
       } catch (err) {
         return fail(err);

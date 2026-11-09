@@ -14,6 +14,12 @@ export interface Config {
    * is never trusted outside it, so a prompt-injected "upload ~/.ssh/id_rsa" has nothing to read.
    */
   filesDir: string;
+  /**
+   * `folder`: uploads are read from and downloads saved to `filesDir` (local use).
+   * `inline`: there is no local disk to use (hosted server), so uploads arrive as base64 and
+   * downloads come back in the tool result.
+   */
+  filesMode: "folder" | "inline";
   /** How long one Populi request may take. Data Slicer reports and big exports can be slow. */
   timeoutMs: number;
 }
@@ -75,6 +81,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     allowWrites: TRUTHY.has((env.POPULI_ALLOW_WRITES ?? "").trim().toLowerCase()),
     sandbox: apiKey.startsWith("sk_sandbox_"),
     filesDir: env.POPULI_FILES_DIR?.trim() ? resolve(env.POPULI_FILES_DIR.trim()) : join(homedir(), "populi-mcp-files"),
+    filesMode: "folder",
     timeoutMs: parseTimeout(env.POPULI_TIMEOUT_MS),
   };
 }
+
+export { parseTimeout };

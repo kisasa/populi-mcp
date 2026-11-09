@@ -57,13 +57,14 @@ export function tempDir(): string {
 
 export const BASE = "https://school.populiweb.com/api2";
 
-export function testConfig(overrides: Partial<{ allowWrites: boolean; filesDir: string; timeoutMs: number }> = {}) {
+export function testConfig(overrides: Partial<{ allowWrites: boolean; filesDir: string; filesMode: "folder" | "inline"; timeoutMs: number }> = {}) {
   return {
     baseUrl: BASE,
     apiKey: "sk_sandbox_test",
     allowWrites: false,
     sandbox: true,
     filesDir: overrides.filesDir ?? tempDir(),
+    filesMode: "folder" as "folder" | "inline",
     timeoutMs: 5000,
     ...overrides,
   };

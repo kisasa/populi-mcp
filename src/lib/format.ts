@@ -4,11 +4,18 @@ import { saveDownload } from "./files.js";
 export const DEFAULT_MAX_CHARS = 40_000;
 export const MAX_MAX_CHARS = 1_000_000;
 
+export type ToolContent =
+  | { type: "text"; text: string }
+  | { type: "resource"; resource: { uri: string; mimeType: string; blob: string } };
+
 export interface ToolResult {
   [key: string]: unknown;
-  content: { type: "text"; text: string }[];
+  content: ToolContent[];
   isError?: boolean;
 }
+
+/** Largest file handed back inside a tool result when there is no local files folder (hosted mode). */
+export const MAX_INLINE_BYTES = 4 * 1024 * 1024;
 
 export function ok(text: string): ToolResult {
   return { content: [{ type: "text", text }] };
@@ -51,6 +58,34 @@ export function renderResponse(res: PopuliResponse, maxChars = DEFAULT_MAX_CHARS
         "It can't be shown here. Use populi_download with the same path and parameters to save it to the files folder."
       );
   }
+}
+
+/**
+ * For populi_download when there is no local disk (hosted server): text and JSON come back as
+ * text, a file comes back as an embedded resource, up to MAX_INLINE_BYTES.
+ */
+export function inlineResponse(res: PopuliResponse, opts: { name?: string; maxChars?: number } = {}): ToolResult {
+  if (res.kind !== "binary") return ok(renderResponse(res, opts.maxChars ?? MAX_MAX_CHARS));
+  const name = opts.name ?? res.filename ?? "download";
+  if (res.data.byteLength > MAX_INLINE_BYTES) {
+    return fail(
+      `${name} is ${res.data.byteLength} bytes, over the ${MAX_INLINE_BYTES}-byte limit for files returned by a hosted ` +
+        "server. Export a smaller range, or run the local populi-mcp server to save large files to disk.",
+    );
+  }
+  return {
+    content: [
+      { type: "text", text: `Populi returned ${name} (${res.contentType || "binary"}, ${res.data.byteLength} bytes), attached.` },
+      {
+        type: "resource",
+        resource: {
+          uri: `populi://download/${encodeURIComponent(name)}`,
+          mimeType: res.contentType || "application/octet-stream",
+          blob: Buffer.from(res.data).toString("base64"),
+        },
+      },
+    ],
+  };
 }
 
 /**

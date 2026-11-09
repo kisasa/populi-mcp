@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: populi-mcp, a hosted MCP server for Claude and ChatGPT connectors, on Lambda behind a function URL.
+
+Parameters:
+  TokenSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: Random string that protects the tokens the server issues. Generate with `openssl rand -base64 48`. Keep a copy; changing it signs everyone out.
+  PopuliBaseUrl:
+    Type: String
+    Default: ""
+    Description: Pin every user to one Populi instance, e.g. https://yourschool.populiweb.com. Leave empty to let people enter their own (limited to populiweb.com and populi.co).
+  PublicUrl:
+    Type: String
+    Default: ""
+    Description: The https address people will use, e.g. https://mcp.yourschool.edu when behind a custom domain. Leave empty to use the function URL.
+  AllowWrites:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: When true, each person can opt in to writes on the connect page. Reads only otherwise.
+
+Resources:
+  PopuliMcpFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      DockerContext: ../..
+      Dockerfile: Dockerfile
+    Properties:
+      PackageType: Image
+      Architectures: [x86_64]
+      MemorySize: 512
+      Timeout: 300
+      Environment:
+        Variables:
+          POPULI_MCP_SECRET: !Ref TokenSecret
+          POPULI_BASE_URL: !Ref PopuliBaseUrl
+          POPULI_MCP_PUBLIC_URL: !Ref PublicUrl
+          POPULI_ALLOW_WRITES: !Ref AllowWrites
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: BUFFERED
+
+Outputs:
+  FunctionUrl:
+    Description: Add this address as the connector URL, followed by /mcp
+    Value: !GetAtt PopuliMcpFunctionUrl.FunctionUrl

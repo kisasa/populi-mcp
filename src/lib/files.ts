@@ -88,13 +88,14 @@ export interface UploadSpec {
   field?: string;
 }
 
-export async function readUpload(root: string, spec: UploadSpec): Promise<UploadFile> {
+export async function readUpload(root: string | undefined, spec: UploadSpec): Promise<UploadFile> {
   if (!!spec.path === !!spec.content_base64) {
     throw new PopuliError("Each file needs exactly one of `path` or `content_base64`.");
   }
   let data: Uint8Array;
   let filename: string;
   if (spec.path) {
+    if (!root) throw new PopuliError("This server has no local files folder: pass the file as `content_base64`.");
     const full = await resolveInside(root, spec.path);
     const info = await stat(full);
     if (!info.isFile()) throw new PopuliError(`${spec.path} is not a file.`);
