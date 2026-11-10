@@ -14,7 +14,7 @@ Workflow: populi_search_api to find a route, populi_describe_api for its paramet
 - Many routes need a path id (e.g. /people/{id}); replace placeholders such as (person) with real ids.
 - Fetching a person returns their record, not their contact details, unless you pass expand (e.g. email_addresses, phone_numbers).
 - Records can contain sensitive student data (SSNs, birthdates, grades, financial aid). Request only the fields and expands you need.
-- Routes that return files (PDF/XLS/CSV exports, transcripts, Data Slicer results, file downloads) need populi_download, which saves into the files folder. all_pages with populi_download also keeps a large export out of the conversation.
+- Routes that return files (PDF/XLS/CSV exports, transcripts, Data Slicer results, file downloads) need populi_download, which saves into the files folder (or, on a hosted server, attaches the file to the result). all_pages with populi_download also keeps a large export out of the conversation.
 - Requests run one at a time (Populi allows a single heavy call at once). If the key is rate limited, later calls fail fast with the wait time instead of retrying; a partly fetched all_pages returns what it got and a next_page to resume from.`;
 
 export function createServer(config: Config, version: string, deps: { client?: PopuliClient; catalog?: Catalog } = {}): McpServer {
@@ -25,7 +25,7 @@ export function createServer(config: Config, version: string, deps: { client?: P
     { name: "populi-mcp", version },
     {
       instructions: config.allowWrites
-        ? `${INSTRUCTIONS}\n- Writes are enabled: populi_write changes live data, and uploads files from the files folder. Confirm with the user before create, update or delete calls.`
+        ? `${INSTRUCTIONS}\n- Writes are enabled: populi_write changes live data, and uploads files. Confirm with the user before create, update or delete calls.`
         : `${INSTRUCTIONS}\n- This server is read-only; creating, updating and deleting records is disabled.`,
     },
   );
