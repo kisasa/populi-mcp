@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { Catalog } from "../lib/catalog.js";
 import type { PopuliClient } from "../lib/client.js";
@@ -40,7 +40,7 @@ export function registerWriteTools(
           ? "Files must be passed as base64 in content_base64 (this server has no local files folder). "
           : "Files must be inside the files folder, or be passed as base64. ") +
         "Confirm destructive or bulk changes with the user before calling.",
-      inputSchema: {
+      inputSchema: z.object({
         method: z.enum(["POST", "PUT", "DELETE"]).describe("POST = create, PUT = update, DELETE = remove"),
         path: z.string().min(1).describe("Route under /api2 with real ids, e.g. /people/24469752/emailaddresses/21648043"),
         body: z.record(z.string(), z.unknown()).optional().describe("JSON body fields for the route"),
@@ -52,7 +52,7 @@ export function registerWriteTools(
           .max(600_000)
           .optional()
           .describe("Per-request timeout. Raise for large uploads (default 120000)"),
-      },
+      }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
     async ({ method, path, body, files, timeout_ms }) => {

@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import {
+  createMcpHandler,
+  isLegacyRequest,
+  WebStandardStreamableHTTPServerTransport,
+  type AuthInfo,
+  type McpServer,
+} from "@modelcontextprotocol/server";
 import { Catalog } from "../lib/catalog.js";
 import { PopuliClient } from "../lib/client.js";
 import type { Config } from "../lib/config.js";
@@ -85,15 +91,57 @@ export function createHostedHandler(deps: HostedDeps): (req: Request) => Promise
       );
     }
 
-    const server = createServer(cfg, deps.version, { client: clientFor(cfg), catalog });
-    const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true, maxRequestBodySize: MAX_BODY_BYTES });
-    await server.connect(transport);
+    // Read the body once, from a clone, so the era check and the guards below don't drain the request.
+    const raw = await req.clone().text();
+    if (raw.length > MAX_BODY_BYTES) return json(413, { error: "request_too_large" });
+    let parsedBody: unknown;
     try {
-      return await transport.handleRequest(req);
-    } finally {
-      void server.close();
+      parsedBody = JSON.parse(raw);
+    } catch {
+      // left undefined: the SDK reads the body itself and answers with a proper parse error
     }
+    const message = parsedBody as { method?: unknown; id?: unknown } | undefined;
+    if (message?.method === "subscriptions/listen") {
+      // A listen stream stays open until the client leaves, which a buffered host (Lambda) can't
+      // serve. The tool list never changes mid-connection, so there is nothing to listen for.
+      return json(200, {
+        jsonrpc: "2.0",
+        id: message.id ?? null,
+        error: { code: -32601, message: "This server sends no change notifications; subscriptions/listen is not supported." },
+      });
+    }
+
+    const authInfo: AuthInfo = { token: "", clientId: "populi-mcp", scopes: ["populi"], extra: { config: cfg } };
+    if (await isLegacyRequest(req, parsedBody, { maxRequestBodySize: MAX_BODY_BYTES })) {
+      // 2025-era clients (initialize handshake): a fresh stateless transport per request, plain JSON replies
+      const server = serverFor(cfg);
+      const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true, maxRequestBodySize: MAX_BODY_BYTES });
+      await server.connect(transport);
+      try {
+        return await transport.handleRequest(req, { parsedBody, authInfo });
+      } finally {
+        void server.close();
+      }
+    }
+    // 2026-07-28 clients: every request is self-contained, no initialize and no session
+    return modern.fetch(req, { parsedBody, authInfo });
   }
+
+  function serverFor(cfg: Config): McpServer {
+    const server = createServer(cfg, deps.version, { client: clientFor(cfg), catalog });
+    // No mid-connection tool changes, so don't invite clients to open a listen stream for them.
+    server.server.registerCapabilities({ tools: { listChanged: false } });
+    return server;
+  }
+
+  const modern = createMcpHandler(
+    (ctx) => {
+      const cfg = (ctx.authInfo?.extra as { config?: Config } | undefined)?.config;
+      if (!cfg) throw new Error("No credentials for this request.");
+      return serverFor(cfg);
+    },
+    { legacy: "reject", responseMode: "json", maxRequestBodySize: MAX_BODY_BYTES },
+  );
 
   return async (req) => {
     const started = Date.now();

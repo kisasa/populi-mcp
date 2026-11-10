@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { PopuliClient, PopuliResponse } from "../lib/client.js";
 import type { Config } from "../lib/config.js";
@@ -92,7 +92,7 @@ export function registerReadTools(server: McpServer, client: PopuliClient, confi
         "Routes that return a file (PDF/XLS exports, transcripts, Data Slicer results, file downloads) can't be " +
         "shown here: use populi_download for those. If a rate limit stops all_pages part-way, the pages already " +
         "fetched are returned with a next_page to resume from.",
-      inputSchema: {
+      inputSchema: z.object({
         ...requestShape,
         max_chars: z
           .number()
@@ -101,7 +101,7 @@ export function registerReadTools(server: McpServer, client: PopuliClient, confi
           .max(MAX_MAX_CHARS)
           .default(DEFAULT_MAX_CHARS)
           .describe("Truncate the response text beyond this many characters"),
-      },
+      }),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     },
     async ({ max_chars, ...args }) => {
@@ -126,14 +126,14 @@ export function registerReadTools(server: McpServer, client: PopuliClient, confi
           "results, file and backup downloads, images) and to keep a big list or full export out of the " +
           "conversation (use all_pages). Takes the same arguments as populi_get. Never overwrites: an existing " +
           "name gets -1, -2, ... appended. Returns the saved path and a short preview.",
-      inputSchema: {
+      inputSchema: z.object({
         ...requestShape,
         save_as: z
           .string()
           .min(1)
           .optional()
           .describe("File name to save under (no folders). Defaults to the name Populi suggests, or a timestamp"),
-      },
+      }),
       // writes only new files, only inside the files folder, and never overwrites
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
@@ -157,12 +157,12 @@ export function registerReadTools(server: McpServer, client: PopuliClient, confi
         "'contains' matches. Returns Populi's people list: ids, names and status, plus a `report_data` block " +
         "with the primary email and phone (contact_primary_email, contact_primary_phone). For full contact " +
         "records fetch /people/{id} with expand=['email_addresses', 'phone_numbers']. Needs at least one criterion.",
-      inputSchema: {
+      inputSchema: z.object({
         email: z.string().optional().describe("Exact email address"),
         first_name: z.string().optional().describe("Substring of the first name"),
         last_name: z.string().optional().describe("Substring of the last name"),
         limit: z.number().int().min(1).max(200).default(25).describe("Maximum people to return"),
-      },
+      }),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     },
     async ({ email, first_name, last_name, limit }) => {

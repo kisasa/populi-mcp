@@ -1,6 +1,6 @@
 {
   "name": "@kisasa/populi-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "MCP server for the Populi API v2: search the API catalog, read people, admissions, academics and billing data, and optionally write",
   "mcpName": "io.github.kisasa/populi-mcp",
   "main": "dist/index.js",
@@ -50,10 +50,11 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@modelcontextprotocol/server": "^2.4.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
     "@types/node": "^22.20.5",
     "typescript": "^5.9.0",
     "vitest": "^5.0.5"

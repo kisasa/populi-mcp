@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { describe, summarize, type Catalog } from "../lib/catalog.js";
 import { fail, ok } from "../lib/format.js";
@@ -12,11 +12,11 @@ export function registerCatalogTools(server: McpServer, catalog: Catalog): void 
         "Search the Populi API v2 route catalog (697 routes across 180 models) by keyword, e.g. 'application', " +
         "'enrollments', 'invoice', 'course offering'. Returns route ids with method and path. " +
         "Use this first to find the right route, then populi_describe_api for its parameters.",
-      inputSchema: {
+      inputSchema: z.object({
         query: z.string().min(1).describe("Keywords, or an exact route id like people.create"),
         method: z.enum(["GET", "POST", "PUT", "DELETE"]).optional().describe("Only routes with this HTTP method"),
         limit: z.number().int().min(1).max(50).default(15).describe("Maximum routes to return"),
-      },
+      }),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },
     async ({ query, method, limit }) => {
@@ -38,11 +38,11 @@ export function registerCatalogTools(server: McpServer, catalog: Catalog): void 
         "Full reference for one route: path placeholders, required/optional parameters with types, expandable " +
         "properties, filter conditions, required Populi roles, and a link to the docs. " +
         "Pass a route id from populi_search_api, or a concrete method and path.",
-      inputSchema: {
+      inputSchema: z.object({
         id: z.string().optional().describe("Route id such as people.show"),
         method: z.enum(["GET", "POST", "PUT", "DELETE"]).optional().describe("With `path`, to look a route up by URL"),
         path: z.string().optional().describe("A route path such as /people/123 or /people/(person)"),
-      },
+      }),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },
     async ({ id, method, path }) => {
