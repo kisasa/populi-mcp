@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { Catalog } from "../lib/catalog.js";
 import type { PopuliClient } from "../lib/client.js";
@@ -13,9 +13,9 @@ export function registerStatusTool(server: McpServer, config: Config, client: Po
       description:
         "Shows which Populi instance this server talks to, whether the key is a sandbox key, and whether " +
         "writes are enabled. Set `verify` to make one live request that checks the key works.",
-      inputSchema: {
+      inputSchema: z.object({
         verify: z.boolean().default(false).describe("Make a live request to check the credentials"),
-      },
+      }),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     },
     async ({ verify }) => {

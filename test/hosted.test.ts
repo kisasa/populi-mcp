@@ -1,3 +1,4 @@
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { describe, expect, it } from "vitest";
 import { ConfigError } from "../src/lib/config.js";
 import { DEFAULT_REDIRECT_RULES, hostAllowed, loadHostedConfig, redirectAllowed, type HostedConfig } from "../src/hosted/config.js";
@@ -547,5 +548,180 @@ describe("over a real HTTP socket", () => {
     } finally {
       server.close();
     }
+  });
+});
+
+const MODERN = "2026-07-28";
+
+interface Sent {
+  httpMethod: string;
+  rpc?: string;
+  version: string | null;
+  status: number;
+}
+
+/** A real v2 SDK client talking HTTP to the handler, with every exchange recorded. */
+async function sdkClient(handler: Handler, accessToken: string, mode: "legacy" | "auto" | { pin: string }) {
+  const sent: Sent[] = [];
+  const transport = new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), {
+    fetch: async (url, init) => {
+      const req = new Request(url, init);
+      const body =
+        req.method === "POST" ? ((await req.clone().json().catch(() => undefined)) as { method?: string } | undefined) : undefined;
+      const res = await handler(req);
+      sent.push({ httpMethod: req.method, rpc: body?.method, version: req.headers.get("mcp-protocol-version"), status: res.status });
+      return res;
+    },
+    requestInit: { headers: { authorization: `Bearer ${accessToken}` } },
+  });
+  const client = new Client({ name: "test", version: "0" }, { versionNegotiation: { mode } });
+  await client.connect(transport);
+  return { client, sent };
+}
+
+const toolNames = async (client: Client) => (await client.listTools()).tools.map((t) => t.name).sort();
+
+describe("MCP endpoint, 2026-07-28 clients", () => {
+  it("serves a client pinned to 2026-07-28: server/discover, then plain requests, no initialize and no 400", async () => {
+    const { handler, populi } = setup();
+    const { tokens } = await signIn(handler);
+    const { client, sent } = await sdkClient(handler, tokens.access_token, { pin: MODERN });
+    expect(client.getNegotiatedProtocolVersion()).toBe(MODERN);
+    expect(client.getProtocolEra()).toBe("modern");
+    expect(client.getServerVersion()?.name).toBe("populi-mcp");
+    expect(client.getInstructions()).toContain("Populi is a student information system");
+
+    expect(await toolNames(client)).toEqual([
+      "populi_describe_api",
+      "populi_download",
+      "populi_find_people",
+      "populi_get",
+      "populi_search_api",
+      "populi_status",
+    ]);
+
+    populi.calls.length = 0;
+    const res = await client.callTool({ name: "populi_get", arguments: { path: "/people", limit: 1 } });
+    expect((res.content as { text: string }[])[0]!.text).toContain("Ada");
+    expect(populi.calls[0]!.headers.Authorization).toBe(`Bearer ${KEY}`);
+
+    expect(sent[0]!.rpc).toBe("server/discover");
+    expect(sent.map((s) => s.rpc)).not.toContain("initialize");
+    for (const s of sent) {
+      expect(s.status, `${s.rpc}`).toBe(200);
+      expect(s.version, `${s.rpc}`).toBe(MODERN);
+    }
+  });
+
+  it("lets an auto-negotiating client settle on 2026-07-28 without the rejected first request", async () => {
+    const { handler } = setup();
+    const { tokens } = await signIn(handler);
+    const { client, sent } = await sdkClient(handler, tokens.access_token, "auto");
+    expect(client.getNegotiatedProtocolVersion()).toBe(MODERN);
+    await client.listTools();
+    expect(sent.filter((s) => s.status >= 400)).toEqual([]);
+    expect(sent.map((s) => s.rpc)).not.toContain("initialize");
+  });
+
+  it("still gives 2025-era clients the classic handshake", async () => {
+    const { handler } = setup();
+    const { tokens } = await signIn(handler);
+    const { client, sent } = await sdkClient(handler, tokens.access_token, "legacy");
+    expect(client.getNegotiatedProtocolVersion()).toBe("2025-11-25");
+    expect(client.getProtocolEra()).toBe("legacy");
+    expect(await toolNames(client)).toContain("populi_get");
+    expect(sent[0]!.rpc).toBe("initialize");
+    // every POST succeeds; the optional GET for a server-to-client stream gets 405, as a stateless server should answer
+    expect(sent.filter((s) => s.httpMethod === "POST").every((s) => s.status < 400)).toBe(true);
+    expect(sent.filter((s) => s.httpMethod === "GET").map((s) => s.status)).toEqual([405]);
+  });
+
+  it("shows both eras the same tools, schemas and annotations", async () => {
+    const { handler } = setup({ allowWrites: true });
+    const { tokens } = await signIn(handler, { allow_writes: "on" });
+    const modern = (await (await sdkClient(handler, tokens.access_token, { pin: MODERN })).client.listTools()).tools;
+    const legacy = (await (await sdkClient(handler, tokens.access_token, "legacy")).client.listTools()).tools;
+    const shape = (tools: typeof modern) =>
+      tools.map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations }));
+    expect(modern.map((t) => t.name)).toContain("populi_write");
+    expect(shape(modern)).toEqual(shape(legacy));
+  });
+
+  it("answers a raw server/discover carrying the 2026-07-28 envelope with 200", async () => {
+    const { handler } = setup();
+    const { tokens } = await signIn(handler);
+    const res = await handler(
+      post(
+        "/mcp",
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "server/discover",
+          params: {
+            _meta: {
+              "io.modelcontextprotocol/protocolVersion": MODERN,
+              "io.modelcontextprotocol/clientInfo": { name: "raw", version: "0" },
+              "io.modelcontextprotocol/clientCapabilities": {},
+            },
+          },
+        },
+        {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${tokens.access_token}`,
+          "mcp-protocol-version": MODERN,
+          "mcp-method": "server/discover",
+        },
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = (await res.json()) as any;
+    expect(body.result.supportedVersions).toContain(MODERN);
+    expect(body.result.capabilities.tools.listChanged).toBe(false);
+  });
+
+  it("still requires a token on 2026-07-28 requests", async () => {
+    const { handler } = setup();
+    const res = await handler(
+      post("/mcp", { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, { "mcp-protocol-version": MODERN, "mcp-method": "tools/list" }),
+    );
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("resource_metadata=");
+  });
+
+  it("turns down subscriptions/listen at once instead of holding a stream open", async () => {
+    const { handler } = setup();
+    const { tokens } = await signIn(handler);
+    const res = await handler(
+      post(
+        "/mcp",
+        { jsonrpc: "2.0", id: 9, method: "subscriptions/listen", params: {} },
+        { authorization: `Bearer ${tokens.access_token}`, "mcp-protocol-version": MODERN, "mcp-method": "subscriptions/listen" },
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).error.code).toBe(-32601);
+  });
+
+  it("keeps writes opt-in on 2026-07-28 too", async () => {
+    const { handler } = setup({ allowWrites: true });
+    const reader = await signIn(handler);
+    const writer = await signIn(handler, { allow_writes: "on" });
+    expect(await toolNames((await sdkClient(handler, reader.tokens.access_token, { pin: MODERN })).client)).not.toContain(
+      "populi_write",
+    );
+    expect(await toolNames((await sdkClient(handler, writer.tokens.access_token, { pin: MODERN })).client)).toContain("populi_write");
+  });
+
+  it("logs 2026-07-28 traffic the same way: method, path, status, timing only", async () => {
+    const lines: string[] = [];
+    const populi = fakeFetch(people());
+    const handler = createHostedHandler({ config: hostedConfig(), version: "0.0.0-test", fetch: populi.fetch, log: (l) => lines.push(l) });
+    const { tokens } = await signIn(handler);
+    lines.length = 0;
+    const { client } = await sdkClient(handler, tokens.access_token, { pin: MODERN });
+    await client.callTool({ name: "populi_get", arguments: { path: "/people" } });
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line).toMatch(/^POST \/mcp 200 \d+ms$/);
   });
 });

@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { Catalog } from "./lib/catalog.js";
 import { PopuliClient } from "./lib/client.js";
 import type { Config } from "./lib/config.js";

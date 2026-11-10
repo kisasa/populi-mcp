@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createRequire } from "node:module";
+import { Catalog } from "./lib/catalog.js";
+import { PopuliClient } from "./lib/client.js";
 import { ConfigError, loadConfig } from "./lib/config.js";
 import { createServer } from "./server.js";
 
@@ -26,8 +28,13 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig();
-  const server = createServer(config, version);
-  await server.connect(new StdioServerTransport());
+  // serveStdio may build more than one server instance (a discarded server/discover probe, then the
+  // real one), so they share one client: one request queue and one rate-limit backoff per process.
+  const client = new PopuliClient(config);
+  const catalog = Catalog.load();
+  serveStdio(() => createServer(config, version, { client, catalog }), {
+    onerror: (err) => console.error(`populi-mcp: ${err.message}`),
+  });
   // stdout carries the protocol; diagnostics go to stderr only
   console.error(
     `populi-mcp ${version} ready: ${config.baseUrl} (${config.sandbox ? "sandbox" : "live"} key, ${

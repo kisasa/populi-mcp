@@ -2,7 +2,7 @@
 
 MCP server for the [Populi](https://populi.co/api) API v2. It lets Claude, Codex, Cursor and any other [Model Context Protocol](https://modelcontextprotocol.io) client look up people, admissions, academics and billing data in your Populi instance, and, if you opt in, make changes.
 
-**Package:** `@kisasa/populi-mcp` on npm. **Command:** `populi-mcp`. **Transports:** stdio (local, the default) or Streamable HTTP with sign-in (`--http`, for [Claude and ChatGPT connectors](#hosted-server-claude-and-chatgpt-connectors)).
+**Package:** `@kisasa/populi-mcp` on npm. **Command:** `populi-mcp`. **Transports:** stdio (local, the default) or Streamable HTTP with sign-in (`--http`, for [Claude and ChatGPT connectors](#hosted-server-claude-and-chatgpt-connectors)). **Protocol:** MCP 2026-07-28, plus the 2025-era `initialize` handshake for older clients, on both transports.
 
 ## How it works
 
@@ -187,6 +187,7 @@ The image runs anywhere containers do, and `--http` needs only Node.js 20+ if yo
 
 - **Files.** There is no local files folder. `populi_download` returns text and JSON in full and attaches a file to the result (up to 4 MB); `populi_write` uploads take `content_base64` only (the request body is limited to about 5 MB).
 - **No sessions.** Every request is self-contained, so scaling and restarts are invisible. A warm instance still keeps each person's one-at-a-time queue and 429 backoff.
+- **Protocol versions.** Clients on MCP 2026-07-28 start with `server/discover` and send each request on its own, with no `initialize`. Older clients get the classic `initialize` handshake, answered statelessly. Both get plain JSON replies, never a stream, so buffered hosts work. The server advertises no tool-list changes, and turns down `subscriptions/listen` straight away rather than holding a stream open.
 - **Revoking access.** Tokens can't be listed or revoked individually. Delete the person's key in Populi (the immediate fix), or rotate `POPULI_MCP_SECRET` to sign everyone out.
 - **Authorization codes** are not single-use (no database to track them), but they last five minutes and need the PKCE verifier only the connecting app holds.
 - **Logs** contain method, path, status and duration only: never bodies, tokens or keys.

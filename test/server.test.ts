@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { describe, expect, it } from "vitest";
 import { PopuliClient } from "../src/lib/client.js";
 import { createServer } from "../src/server.js";
@@ -355,5 +355,61 @@ describe("populi_status", () => {
 
     const bad = await connect({}, jsonResponse({ message: "bad key" }, { status: 401 }));
     expect((await bad.call("populi_status", { verify: true })).isError).toBe(true);
+  });
+});
+
+/** The local entry point's wiring (serveStdio over a server factory), on an in-memory pipe. */
+async function connectStdio(mode: "legacy" | "auto" | { pin: string }, ...replies: Reply[]) {
+  const config = testConfig({ allowWrites: true });
+  const http = fakeFetch(...(replies.length ? replies : [jsonResponse({ object: "list", data: [{ id: 1 }] })]));
+  const populi = new PopuliClient(config, http.fetch);
+  const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+  const handle = serveStdio(() => createServer(config, "0.0.0-test", { client: populi }), { transport: serverSide });
+  const client = new Client({ name: "test", version: "0" }, { versionNegotiation: { mode } });
+  await client.connect(clientSide);
+  return { client, http, handle };
+}
+
+describe("stdio entry, both protocol eras", () => {
+  it("negotiates 2026-07-28 with a modern client and serves tools", async () => {
+    const { client, http, handle } = await connectStdio({ pin: "2026-07-28" });
+    expect(client.getNegotiatedProtocolVersion()).toBe("2026-07-28");
+    expect(client.getProtocolEra()).toBe("modern");
+    const res = await client.callTool({ name: "populi_get", arguments: { path: "/people" } });
+    expect((res.content as { text: string }[])[0]!.text).toContain('"id": 1');
+    expect(http.calls).toHaveLength(1);
+    await handle.close();
+  });
+
+  it("keeps the classic handshake for 2025-era clients", async () => {
+    const { client, handle } = await connectStdio("legacy");
+    expect(client.getNegotiatedProtocolVersion()).toBe("2025-11-25");
+    expect(client.getProtocolEra()).toBe("legacy");
+    await handle.close();
+  });
+
+  it("settles on 2026-07-28 when the client negotiates automatically", async () => {
+    const { client, handle } = await connectStdio("auto");
+    expect(client.getNegotiatedProtocolVersion()).toBe("2026-07-28");
+    await handle.close();
+  });
+
+  it("lists identical tools to both eras", async () => {
+    const modern = await connectStdio({ pin: "2026-07-28" });
+    const legacy = await connectStdio("legacy");
+    const a = (await modern.client.listTools()).tools;
+    const b = (await legacy.client.listTools()).tools;
+    expect(a.map((t) => t.name).sort()).toEqual([
+      "populi_describe_api",
+      "populi_download",
+      "populi_find_people",
+      "populi_get",
+      "populi_search_api",
+      "populi_status",
+      "populi_write",
+    ]);
+    expect(a).toEqual(b);
+    await modern.handle.close();
+    await legacy.handle.close();
   });
 });
