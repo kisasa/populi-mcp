@@ -8,7 +8,7 @@ import { hostAllowed, type HostedConfig } from "./config.js";
 import { json, OAuthServer, type Creds } from "./oauth.js";
 import { TokenBox } from "./tokens.js";
 
-/** Largest request body the server accepts; Lambda's own limit is 6 MB, and uploads travel as base64. */
+/** Largest request body the server accepts. Many hosts cap bodies at a few MB, and uploads travel as base64. */
 export const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
 const CLIENT_IDLE_MS = 10 * 60_000;

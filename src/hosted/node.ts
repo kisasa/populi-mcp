@@ -11,7 +11,7 @@ async function toRequest(req: IncomingMessage): Promise<Request | "too-large"> {
     if (size > MAX_BODY_BYTES + 1024) return "too-large";
     chunks.push(chunk as Buffer);
   }
-  // behind a TLS-terminating proxy (Lambda function URL, CloudFront, a load balancer) the original scheme is in x-forwarded-proto
+  // behind a TLS-terminating proxy (a load balancer, CDN or reverse proxy) the original scheme is in x-forwarded-proto
   const proto = first(req.headers["x-forwarded-proto"]) ?? "http";
   const host = first(req.headers["x-forwarded-host"]) ?? req.headers.host ?? "localhost";
   const headers = new Headers();
@@ -43,7 +43,7 @@ async function respond(handler: (req: Request) => Promise<Response>, req: Incomi
   }
 }
 
-/** Serves a fetch-style handler on a plain Node HTTP server (a container, a laptop, or Lambda behind the Web Adapter). */
+/** Serves a fetch-style handler on a plain Node HTTP server (a container, a VM or a laptop). */
 export function listen(handler: (req: Request) => Promise<Response>, port: number, host = "0.0.0.0"): Promise<Server> {
   const server = createServer((req, res) => void respond(handler, req, res));
   return new Promise((resolve, reject) => {

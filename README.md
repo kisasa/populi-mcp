@@ -154,13 +154,13 @@ docker run -p 8080:8080 \
   populi-mcp
 ```
 
-Without Docker: `POPULI_MCP_SECRET=... npx -y @kisasa/populi-mcp --http`. The connector URL is the public address plus `/mcp`. It must be served over HTTPS (put it behind a load balancer, CloudFront or a reverse proxy, or run it on Lambda as described under Deploying it).
+Without Docker: `POPULI_MCP_SECRET=... npx -y @kisasa/populi-mcp --http`. The connector URL is the public address plus `/mcp`. It must be served over HTTPS (put it behind a load balancer or reverse proxy, or use a host that terminates TLS for you).
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `POPULI_MCP_SECRET` | yes | 32+ random characters. Seals every token. Changing it signs everyone out, so keep a copy. |
 | `POPULI_MCP_PREVIOUS_SECRETS` | no | Comma-separated older secrets that still open tokens, for rotation: put the new secret in `POPULI_MCP_SECRET` and the old one here. |
-| `POPULI_MCP_PUBLIC_URL` | recommended | The `https://` address people use. If unset it is derived from the request (`x-forwarded-proto`/`host`), which suits a bare Lambda function URL but not a custom domain in front of it. |
+| `POPULI_MCP_PUBLIC_URL` | recommended | The `https://` address people use. If unset it is derived from the request (`x-forwarded-proto`/`host`), which works when the server is reached at its own address but not behind a proxy or custom domain that rewrites the host. |
 | `POPULI_BASE_URL` | no | Pin everyone to one Populi instance; the connect page then asks only for a key. Tokens for any other instance stop working. |
 | `POPULI_ALLOWED_HOSTS` | no | When the instance is *not* pinned, the hostname suffixes people may enter. Default `populiweb.com,populi.co`. This keeps the server from being pointed at arbitrary sites. |
 | `POPULI_ALLOW_WRITES` | no | `true` lets each person tick an "allow changes" box when connecting. Reads only otherwise, and unticked people stay read-only. |
@@ -176,7 +176,12 @@ Without Docker: `POPULI_MCP_SECRET=... npx -y @kisasa/populi-mcp --http`. The co
 
 ### Deploying it
 
-The image runs anywhere containers do. It also runs on AWS Lambda unchanged: the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) in the image only starts inside Lambda, so a Lambda function URL (no API Gateway, so no 30-second limit on slow Populi reports) can serve it directly. Where and how you deploy is your choice and not part of this library; one worked example is [kisasa/populi-mcp-deployment](https://github.com/kisasa/populi-mcp-deployment), which installs a pinned release from npm instead of building from source.
+The image runs anywhere containers do, and `--http` needs only Node.js 20+ if you would rather not use one. Where and how you deploy (which platform, what terminates HTTPS, how secrets are supplied) is up to you. A few things matter whatever you choose:
+
+- Pin a released version (`@kisasa/populi-mcp@x.y.z`) rather than building from `main`.
+- Keep `POPULI_MCP_SECRET` in your platform's secret store, and keep a copy: losing it signs everyone out.
+- Allow long requests. Some Populi reports take minutes, so a front end that cuts requests off at 30 seconds will break them.
+- Allow request bodies of about 5 MB if people will upload files.
 
 ### What differs from the local server
 
