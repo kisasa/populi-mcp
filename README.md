@@ -154,7 +154,7 @@ docker run -p 8080:8080 \
   populi-mcp
 ```
 
-Without Docker: `POPULI_MCP_SECRET=... npx -y @kisasa/populi-mcp --http`. The connector URL is the public address plus `/mcp`. It must be served over HTTPS (put it behind a load balancer, CloudFront, a reverse proxy, or run it on Lambda below).
+Without Docker: `POPULI_MCP_SECRET=... npx -y @kisasa/populi-mcp --http`. The connector URL is the public address plus `/mcp`. It must be served over HTTPS (put it behind a load balancer, CloudFront or a reverse proxy, or run it on Lambda as described under Deploying it).
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -174,17 +174,9 @@ Without Docker: `POPULI_MCP_SECRET=... npx -y @kisasa/populi-mcp --http`. The co
 - **ChatGPT**: Settings > Connectors (or Apps), enable developer mode if your workspace requires it, create a connector with the same URL, and choose OAuth. Workspace admins may need to allow custom connectors first.
 - **Claude Code**: `claude mcp add --transport http populi https://<your address>/mcp`, then run `/mcp` to sign in.
 
-### Deploy on AWS Lambda
+### Deploying it
 
-`deploy/aws-lambda/template.yaml` is a [SAM](https://docs.aws.amazon.com/serverless-application-model/) template: one container-image function with a function URL (no API Gateway, so there is no 30-second limit on slow Populi reports). The [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) already in the image runs the HTTP server unchanged.
-
-```bash
-cd deploy/aws-lambda
-sam build
-sam deploy --guided   # asks for TokenSecret, optional PopuliBaseUrl / PublicUrl, AllowWrites
-```
-
-The `FunctionUrl` output plus `/mcp` is the connector address. For a branded address, put CloudFront (or another HTTPS front end) in front and set `PublicUrl` to it. At school-sized usage the hosting cost is typically a few dollars a month or less.
+The image runs anywhere containers do. It also runs on AWS Lambda unchanged: the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) in the image only starts inside Lambda, so a Lambda function URL (no API Gateway, so no 30-second limit on slow Populi reports) can serve it directly. Where and how you deploy is your choice and not part of this library; one worked example is [kisasa/populi-mcp-deployment](https://github.com/kisasa/populi-mcp-deployment), which installs a pinned release from npm instead of building from source.
 
 ### What differs from the local server
 
